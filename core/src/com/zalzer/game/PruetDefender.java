@@ -25,7 +25,7 @@ import java.util.Iterator;
 public class PruetDefender extends ApplicationAdapter {
     public static int WIDTH = 800;
     public static int HEIGHT = 480;
-    public static String TITLE = "Pruet Defender";
+    public static String TITLE = "PEFENDER";
     private StateManager stateManager;
     SpriteBatch batch;
     Texture img;
@@ -123,7 +123,7 @@ public class PruetDefender extends ApplicationAdapter {
             if (degree <= -112.5 && degree >= -157.5)
                 return "UP-LEFT";
             if (degree <= 157.5 && degree >= 112.5)
-                return "DOWN-LEFt";
+                return "DOWN-LEFT";
             Gdx.app.log("Gesture", "Unknow degree " + degree);
             return "UNKNOW";
         }
