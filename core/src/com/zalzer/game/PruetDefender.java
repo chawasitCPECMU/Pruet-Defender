@@ -7,20 +7,15 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Bresenham2;
 import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.math.Vector2;
-import com.badlogic.gdx.utils.Array;
 import com.zalzer.game.api.StateManager;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
-import java.awt.image.WritableRaster;
-import java.io.File;
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 
 public class PruetDefender extends ApplicationAdapter {
     public static int WIDTH = 800;
@@ -33,6 +28,33 @@ public class PruetDefender extends ApplicationAdapter {
     Pixmap pixmap;
     Vector2 vector1, vector2, vectorDraw;
     ArrayList<Integer> pattern;
+    int GESTURE_GRID_SIZE = 10;
+    int[] histogram;
+    ArrayList<String> gestureList;
+    int gestureStack;
+    BitmapFont font;
+
+    String[] shape = {
+            "Horizontal Line (right)",
+            "Horizontal Line (left)",
+            "Vertical Line (up)",
+            "Vertical Line (down)",
+            "Caret",
+            "Caret",
+            "Circle",
+            "Rectangle"
+    };
+    int[][] prototype = {{15, 0, 0, 0, 0, 0, 0, 0, 15},
+            {0, 15, 0, 0, 0, 0, 0, 0, 15},
+            {0, 0, 15, 0, 0, 0, 0, 0, 15},
+            {0, 0, 0, 15, 0, 0, 0, 0, 15},
+            {0, 0, 0, 0, 15, 15, 0, 0, 30},
+            {0, 0, 0, 0, 0, 0, 15, 15, 30},
+            {5, 5, 5, 5, 5, 5, 5, 5, 40},
+            {5, 5, 5, 5, 0, 0, 0, 0, 20},
+            // R L U D UR DR UL DL
+    };
+    private double MAX_ERROR = 0.2;
 
     @Override
     public void create() {
@@ -43,6 +65,7 @@ public class PruetDefender extends ApplicationAdapter {
         vector2 = new Vector2();
         vectorDraw = new Vector2();
         pattern = new ArrayList<Integer>();
+        font = new BitmapFont();
         Gdx.input.setInputProcessor(processor);
     }
 
@@ -53,7 +76,41 @@ public class PruetDefender extends ApplicationAdapter {
         batch.begin();
         if (touchPic != null)
             batch.draw(touchPic, 0, 0);
+        if (gestureList != null) {
+            GlyphLayout layout = new GlyphLayout(font, "Direction: " + gestureList);
+            GlyphLayout layout2 = new GlyphLayout(font, "Shape: " + detectShape());
+            font.draw(batch, layout, 400 - layout.width / 2, 50);
+            font.draw(batch, layout2, 400 - layout2.width / 2, 80);
+            font.draw(batch, "Stack: " + gestureStack, 400 - 28, 20);
+        }
         batch.end();
+    }
+
+    private String detectShape() {
+        if (histogram == null || histogram[8] == 0)
+            return " - ";
+        double min_error = 10000000000000.00;
+        int ans = -1;
+        // Calculate Error with Chi-Square
+        double error, dx, dy;
+        for (int i = 0; i < prototype.length; i++) {
+            error = 0.0;
+            for (int j = 0; j < 8; j++) {
+                dx = prototype[i][j] / (double) prototype[i][8];
+                dy = histogram[j] / (double) histogram[8];
+                if(dx>0) // Avoid NaN
+                error += Math.pow(dx - dy, 2) / (dx);
+            }
+            if (error < min_error) {
+                ans = i;
+                min_error = error;
+            }
+//            Gdx.app.log("shape ", shape[i] + " has error: " + error);
+        }
+        if (ans == -1)
+            return " -- ";
+        Gdx.app.log("shape", "Most Matched: " + shape[ans] + " error: " + min_error);
+        return (min_error > MAX_ERROR) ? "unknow" : shape[ans];
     }
 
     @Override
@@ -64,9 +121,6 @@ public class PruetDefender extends ApplicationAdapter {
 
     InputProcessor processor = new InputProcessor() {
 
-        int GRID_SIZE = 30;
-        ArrayList<String> list;
-        int stack;
 
         @Override
         public boolean keyDown(int keycode) {
@@ -92,7 +146,9 @@ public class PruetDefender extends ApplicationAdapter {
             pixmap.setColor(Color.LIGHT_GRAY);
             vector1.set(screenX, screenY);
             vectorDraw.set(vector1);
-            list = new ArrayList<String>();
+            gestureList = new ArrayList<String>();
+            gestureStack = 0;
+            histogram = new int[9];
             return true;
         }
 
@@ -103,40 +159,56 @@ public class PruetDefender extends ApplicationAdapter {
             touchPic = new Texture(pixmap);
             if (pixmap != null)
                 pixmap.dispose();
-            Gdx.app.log("Gesture", "Data List: " + list);
+            histogram[8] = gestureStack;
+            String his = "";
+            for (int x :
+                    histogram) {
+                his += x + ", ";
+            }
+            detectShape();
+            Gdx.app.log("Histogram", his);
+            Gdx.app.log("Gesture", "Data List: " + gestureList);
             return true;
         }
 
         private String degreeToString(double degree) {
-            if (degree <= 22.5 && degree >= -22.5)
+            gestureStack++;
+            if (degree <= 22.5 && degree >= -22.5) {
+                histogram[0]++;
                 return "RIGHT";
-            if (degree >= -180 && degree <= -157.5 || degree <= 180 && degree >= 157.5)
+            } else if (degree >= -180 && degree <= -157.5 || degree <= 180 && degree >= 157.5) {
+                histogram[1]++;
                 return "LEFT";
-            if (degree <= -67.5 && degree >= -112.5)
+            } else if (degree <= -67.5 && degree >= -112.5) {
+                histogram[2]++;
                 return "UP";
-            if (degree <= 112.5 && degree >= 67.5)
+            } else if (degree <= 112.5 && degree >= 67.5) {
+                histogram[3]++;
                 return "DOWN";
-            if (degree <= -22.5 && degree >= -67.5)
+            } else if (degree <= -22.5 && degree >= -67.5) {
+                histogram[4]++;
                 return "UP-RIGHT";
-            if (degree <= 67.5 && degree >= 22.5)
+            } else if (degree <= 67.5 && degree >= 22.5) {
+                histogram[5]++;
                 return "DOWN-RIGHT";
-            if (degree <= -112.5 && degree >= -157.5)
+            } else if (degree <= -112.5 && degree >= -157.5) {
+                histogram[6]++;
                 return "UP-LEFT";
-            if (degree <= 157.5 && degree >= 112.5)
+            } else if (degree <= 157.5 && degree >= 112.5) {
+                histogram[7]++;
                 return "DOWN-LEFT";
+            }
+            gestureStack--;
             Gdx.app.log("Gesture", "Unknow degree " + degree);
             return "UNKNOW";
         }
 
         private void saveDirection(double degree) {
-            stack++;
             String direction = degreeToString(degree);
-            if (list.isEmpty() || (!list.isEmpty() && list.get(list.size() - 1).compareTo(direction) != 0)) {
-                list.add(direction);
-                stack = 1;
+            if (gestureList.isEmpty() || (!gestureList.isEmpty() && gestureList.get(gestureList.size() - 1).compareTo(direction) != 0)) {
+                gestureList.add(direction);
             }
-
-            Gdx.app.log("Gesture", "Detect: " + direction + " stack: " + stack);
+//            Gdx.app.log("Gesture", "Detect: " + direction + " Stack: " + gestureStack);
         }
 
         @Override
@@ -149,7 +221,7 @@ public class PruetDefender extends ApplicationAdapter {
 
             vectorDraw.set(screenX, screenY);
 
-            if (Math.abs(screenX - vector1.x) < GRID_SIZE && Math.abs(screenY - vector1.y) < GRID_SIZE)
+            if (Math.abs(screenX - vector1.x) < GESTURE_GRID_SIZE && Math.abs(screenY - vector1.y) < GESTURE_GRID_SIZE)
                 return true;
 
             double degree = Math.toDegrees(Math.atan2(screenY - vector1.y, screenX - vector1.x));
