@@ -7,9 +7,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
-import com.badlogic.gdx.graphics.g2d.BitmapFont;
-import com.badlogic.gdx.graphics.g2d.GlyphLayout;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
+import com.badlogic.gdx.graphics.g2d.*;
 import com.badlogic.gdx.math.Bresenham2;
 import com.badlogic.gdx.math.GridPoint2;
 import com.badlogic.gdx.math.Vector2;
@@ -24,6 +22,8 @@ public class PruetDefender extends ApplicationAdapter {
     private StateManager stateManager;
     SpriteBatch batch;
     Texture img;
+    Texture bg;
+    Texture earth;
     Texture touchPic;
     Pixmap pixmap;
     Vector2 vector1, vector2, vectorDraw;
@@ -33,6 +33,10 @@ public class PruetDefender extends ApplicationAdapter {
     ArrayList<String> gestureList;
     int gestureStack;
     BitmapFont font;
+    ArrayList<GridPoint2> vectorList;
+    int gesture_ans;
+    int gesture_prev_ans;
+    double last_error;
 
     String[] shape = {
             "Horizontal Line (right)",
@@ -54,39 +58,57 @@ public class PruetDefender extends ApplicationAdapter {
             {5, 5, 5, 5, 0, 0, 0, 0, 20},
             // R L U D UR DR UL DL
     };
-    private double MAX_ERROR = 0.2;
+    private double MAX_ERROR = 0.25;
+    private ParticleEffect star;
+    private TextureAtlas particleAtlas;
 
     @Override
     public void create() {
         stateManager = new StateManager();
         batch = new SpriteBatch();
         img = new Texture("badlogic.jpg");
+        bg = new Texture(Gdx.files.internal("Background3.png"), true);
+        earth = new Texture(Gdx.files.internal("Earth2.png"), true);
         vector1 = new Vector2();
         vector2 = new Vector2();
         vectorDraw = new Vector2();
         pattern = new ArrayList<Integer>();
         font = new BitmapFont();
         Gdx.input.setInputProcessor(processor);
+        star = new ParticleEffect();
+        star.load(Gdx.files.internal("star.p"), Gdx.files.internal("."));
+        star.setPosition(WIDTH/2, HEIGHT/2);
+        star.start();
     }
 
     @Override
     public void render() {
-        Gdx.gl.glClearColor(1, 0, 0, 1);
+        Gdx.gl.glClearColor(0, 0, 0, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         batch.begin();
-        if (touchPic != null)
+//        batch.draw(bg, 0, 0, WIDTH, HEIGHT);
+        star.draw(batch, Gdx.graphics.getDeltaTime());
+        batch.draw(earth, WIDTH/2 - 100, HEIGHT/2 - 100, 200, 200);
+        if (touchPic != null) {
             batch.draw(touchPic, 0, 0);
+        }
         if (gestureList != null) {
+            if(gestureList.size()>6)
+                gestureList.remove(0);
             GlyphLayout layout = new GlyphLayout(font, "Direction: " + gestureList);
             GlyphLayout layout2 = new GlyphLayout(font, "Shape: " + detectShape());
             font.draw(batch, layout, 400 - layout.width / 2, 50);
+            font.draw(batch, " error: "+ ((last_error>-1)?last_error:"GTX780TI :X"), 25, 460);
             font.draw(batch, layout2, 400 - layout2.width / 2, 80);
-            font.draw(batch, "Stack: " + gestureStack, 400 - 28, 20);
+            int  fps = Gdx.graphics.getFramesPerSecond();
+            font.draw(batch, "FPS: " + ((fps>24)?fps:"*CENSOR* :P"), 25, 25);
         }
         batch.end();
     }
 
     private String detectShape() {
+        gesture_ans = -1;
+        last_error = -1;
         if (histogram == null || histogram[8] == 0)
             return " - ";
         double min_error = 10000000000000.00;
@@ -98,8 +120,8 @@ public class PruetDefender extends ApplicationAdapter {
             for (int j = 0; j < 8; j++) {
                 dx = prototype[i][j] / (double) prototype[i][8];
                 dy = histogram[j] / (double) histogram[8];
-                if(dx>0) // Avoid NaN
-                error += Math.pow(dx - dy, 2) / (dx);
+                if (dx > 0) // Avoid NaN
+                    error += Math.pow(dx - dy, 2) / (dx);
             }
             if (error < min_error) {
                 ans = i;
@@ -109,7 +131,9 @@ public class PruetDefender extends ApplicationAdapter {
         }
         if (ans == -1)
             return " -- ";
-        Gdx.app.log("shape", "Most Matched: " + shape[ans] + " error: " + min_error);
+        gesture_ans = min_error > MAX_ERROR ? -1 : ans;
+        last_error = min_error;
+//        Gdx.app.log("shape", "Most Matched: " + shape[ans] + " error: " + min_error);
         return (min_error > MAX_ERROR) ? "unknow" : shape[ans];
     }
 
@@ -142,12 +166,15 @@ public class PruetDefender extends ApplicationAdapter {
         @Override
         public boolean touchDown(int screenX, int screenY, int pointer, int button) {
             Gdx.app.log("Touch", "Touch Down: " + screenX + " " + screenY);
-            pixmap = new Pixmap(800, 480, Pixmap.Format.RGBA8888);
+            pixmap = new Pixmap(WIDTH, HEIGHT, Pixmap.Format.RGBA8888);
             pixmap.setColor(Color.LIGHT_GRAY);
             vector1.set(screenX, screenY);
             vectorDraw.set(vector1);
             gestureList = new ArrayList<String>();
+            vectorList = new ArrayList<GridPoint2>();
             gestureStack = 0;
+            gesture_ans = -1;
+            gesture_prev_ans = -2;
             histogram = new int[9];
             return true;
         }
@@ -155,24 +182,72 @@ public class PruetDefender extends ApplicationAdapter {
         @Override
         public boolean touchUp(int screenX, int screenY, int pointer, int button) {
             Gdx.app.log("Touch", "Finish");
-
-            touchPic = new Texture(pixmap);
+            gestureColor();
+//            touchPic = new Texture(pixmap);
             if (pixmap != null)
                 pixmap.dispose();
-            histogram[8] = gestureStack;
+//            histogram[8] = gestureStack;
             String his = "";
             for (int x :
                     histogram) {
                 his += x + ", ";
             }
             detectShape();
+            touchPic.dispose();
+            touchPic = null;
             Gdx.app.log("Histogram", his);
             Gdx.app.log("Gesture", "Data List: " + gestureList);
             return true;
         }
 
+        private void setLineColor(Color color) {
+            pixmap = new Pixmap(WIDTH, HEIGHT, Pixmap.Format.RGBA8888);
+            pixmap.setColor(color);
+            for (GridPoint2 point :
+                    vectorList) {
+                pixmap.fillCircle(point.x, point.y, 3);
+            }
+            touchPic = new Texture(pixmap);
+        }
+
+        private void gestureColor() {
+            if (pixmap == null) return;
+            if (gesture_ans == gesture_prev_ans)
+                return;
+            gesture_prev_ans = gesture_ans;
+            switch (gesture_ans) {
+                case 0:
+                    setLineColor(Color.RED);
+                    break;
+                case 1:
+                    setLineColor(Color.RED);
+                    break;
+                case 2:
+                    setLineColor(Color.BLUE);
+                    break;
+                case 3:
+                    setLineColor(Color.BLUE);
+                    break;
+                case 4:
+                    setLineColor(Color.YELLOW);
+                    break;
+                case 5:
+                    setLineColor(Color.YELLOW);
+                    break;
+                case 6:
+                    setLineColor(Color.PINK);
+                    break;
+                case 7:
+                    setLineColor(Color.MAGENTA);
+                    break;
+                default:
+                    setLineColor(Color.LIGHT_GRAY);
+                    break;
+            }
+        }
+
         private String degreeToString(double degree) {
-            gestureStack++;
+            histogram[8]++;
             if (degree <= 22.5 && degree >= -22.5) {
                 histogram[0]++;
                 return "RIGHT";
@@ -198,7 +273,7 @@ public class PruetDefender extends ApplicationAdapter {
                 histogram[7]++;
                 return "DOWN-LEFT";
             }
-            gestureStack--;
+            histogram[8]--;
             Gdx.app.log("Gesture", "Unknow degree " + degree);
             return "UNKNOW";
         }
@@ -215,8 +290,12 @@ public class PruetDefender extends ApplicationAdapter {
         public boolean touchDragged(int screenX, int screenY, int pointer) {
 //            Gdx.app.log("Touch", "Drag: " + screenX + " " + screenY);
             Bresenham2 b = new Bresenham2();
-            for (GridPoint2 point : b.line((int) vectorDraw.x, (int) vectorDraw.y, screenX, screenY))
+            for (GridPoint2 point : b.line((int) vectorDraw.x, (int) vectorDraw.y, screenX, screenY)) {
                 pixmap.fillCircle(point.x, point.y, 3);
+                vectorList.add(point);
+            }
+
+            gestureColor();
             touchPic = new Texture(pixmap);
 
             vectorDraw.set(screenX, screenY);
@@ -229,6 +308,9 @@ public class PruetDefender extends ApplicationAdapter {
 //            Gdx.app.log("Gesture", "Angle " + degree);
 
             vector1.set(screenX, screenY);
+            gestureColor();
+//            touchPic = new Texture(pixmap);
+
             return true;
         }
 

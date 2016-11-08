@@ -11,6 +11,7 @@ public class DesktopLauncher {
         config.height = PruetDefender.HEIGHT;
         config.title = PruetDefender.TITLE;
 		config.resizable = false;
+		config.samples = 16;
 		new LwjglApplication(new PruetDefender(), config);
 	}
 }
